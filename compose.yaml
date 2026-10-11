@@ -1,0 +1,16 @@
+services:
+  homely-tools:
+    image: homely-tools:latest
+    container_name: homely-tools
+    restart: unless-stopped
+
+    env_file:
+      - .env
+
+    environment:
+      TZ: Europe/Oslo
+      MQTT_DISCOVERY: homeassistant
+      MQTT_STATE: homely-test
+
+    volumes:
+      - /etc/localtime:/etc/localtime:ro

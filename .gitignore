@@ -13,5 +13,9 @@
 # User-specific files
 *.out
 
+.env
+
 # MacOS 
 .DS_Store
+homely-devices.json
+homely-schema.json

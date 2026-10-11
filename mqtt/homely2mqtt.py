@@ -129,6 +129,9 @@ else:
 
     print('------------------------- Home state ----------------------------------')
     hs = h.homestatus()
+    # Midlertidig eksport av Homely-data
+    with open("/tmp/homely-devices.json", "w", encoding="utf-8") as f:
+        json.dump(hs, f, indent=2, ensure_ascii=False)
 
     if args.save != "":
         with open(args.save, "w") as wfile:
