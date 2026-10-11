@@ -232,6 +232,19 @@ for d in hs['devices']:
                 sub_device="door"
                 component[f"{devid}_{sub_device}"] = MQTT_AD_Device(devname, modelname, feature, sub_device, d)
                 component[f"{devid}_{sub_device}"].device_config_publish()
+            elif modelname == "Intelligent Smoke Alarm" and state == 'alarm':
+                sub_device = "smoke"
+                component[f"{devid}_{sub_device}"] = MQTT_AD_Device(
+                    devname, modelname, feature, sub_device, d
+                )
+                component[f"{devid}_{sub_device}"].device_config_publish()
+
+            elif modelname == "Water Leak Detector" and state == 'alarm':
+                sub_device = "moisture"
+                component[f"{devid}_{sub_device}"] = MQTT_AD_Device(
+                    devname, modelname, feature, sub_device, d
+                )
+                component[f"{devid}_{sub_device}"].device_config_publish()
 
 
 def alarm_state(ht):
@@ -270,7 +283,7 @@ def siomsg(smsg):
                 # 
                 # Only motion sensors and window/door sensors supported
                 #
-                for sub_device in ['motion', 'door']:
+                for sub_device in ['motion', 'door', 'smoke', 'moisture']:
                     id_subdevice=f"{devid}_{sub_device}"
                     if id_subdevice in component:
                         component[id_subdevice].device_message(onoff, timestamp = c['lastUpdated'])
@@ -339,6 +352,16 @@ while True:
 
                     elif modelname in ["Window Sensor", "Alarm Entry Sensor 2"]:
                         component[f"{devid}_door"].device_message(onoff, timestamp=dt)
+                    elif modelname == "Intelligent Smoke Alarm":
+                        component[f"{devid}_smoke"].device_message(
+                            onoff, timestamp=dt
+                        )
+
+                    elif modelname == "Water Leak Detector":
+                        component[f"{devid}_moisture"].device_message(
+                            onoff, timestamp=dt
+                        )
+
                 elif state == 'networklinkstrength' and int(dv) < devs_lqi:
                     devs_lqi = int(dv)
                 elif state == 'low' and dv:

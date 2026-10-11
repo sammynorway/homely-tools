@@ -19,6 +19,8 @@ def devtype_component(dt):
         'linkpercent':      'sensor',
         'temperature':      'sensor',
         'temp':             'sensor',
+        'smoke':            'binary_sensor',
+        'moisture':         'binary_sensor',
         'dummy':            None
     }.get(dt, dt)
 
@@ -36,6 +38,8 @@ def devtype_icons(dt):
         'linkpercent':      'mdi:signal',
         'door':             'mdi:door',
         'motion':           'mdi:motion-sensor',
+        'smoke':            'mdi:smoke-detector',
+        'moisture':         'mdi:water-alert',
         'dummy':            None
     }.get(dt, None)
 
