@@ -145,9 +145,24 @@ for d in hs['devices']:
     for feature in d['features'].keys():
         # if feature not in ['alarm', 'temperature']:
         #     continue
-        ds=d['features']['diagnostic']['states']
-        online = 'online' if d['online'] else "offline"
-        print(f"Serial {dev_unique_id} --> {d['modelName']} name {d['name']}-{feature} link state {online} links to {ds['networklinkaddress']['value']} strenght {ds['networklinkstrength']['value']}")
+                # Hent diagnostikkdata dersom de finnes
+        ds = d.get('features', {}).get('diagnostic', {}).get('states', {})
+
+        # Håndter manglende nettverksinformasjon
+        network_address = ds.get('networklinkaddress', {}).get('value', 'unknown')
+        network_strength = ds.get('networklinkstrength', {}).get('value', 'unknown')
+
+        # Enhetens tilkoblingsstatus
+        online = 'online' if d.get('online', False) else 'offline'
+
+        # Skriv enhetsinformasjon til loggen
+        print(
+            f"Serial {dev_unique_id} --> {d.get('modelName', 'Unknown')} "
+            f"name {d.get('name', 'Unknown')}-{feature} "
+            f"link state {online} "
+            f"links to {network_address} "
+            f"strength {network_strength}"
+        )
 
 if args.siteprefix != "":
     sitename = args.siteprefix
@@ -155,6 +170,14 @@ else:
     sitename = hs['name']
 
 mq = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, progname)
+
+# MQTT-autentisering
+mqtt_user = os.environ.get("MQTT_USER")
+mqtt_password = os.environ.get("MQTT_PASSWORD")
+
+if mqtt_user:
+    mq.username_pw_set(mqtt_user, mqtt_password)
+
 mq.connect(args.mqttserver, port=args.mqttport, keepalive=600)
 mq.loop_start()
 hm = MQTT_AD_Config(
@@ -201,11 +224,11 @@ for d in hs['devices']:
                 sub_device="temp"
                 component[f"{devid}_{sub_device}"] = MQTT_AD_Device(devname, modelname, feature, sub_device, d)
                 component[f"{devid}_{sub_device}"].device_config_publish()
-            elif modelname == "Motion Sensor Mini" and state == 'alarm':
+            elif modelname in ["Motion Sensor Mini", "Alarm Motion Sensor 2"] and state == 'alarm':
                 sub_device="motion"
                 component[f"{devid}_{sub_device}"] = MQTT_AD_Device(devname, modelname, feature, sub_device, d)
                 component[f"{devid}_{sub_device}"].device_config_publish()
-            elif modelname == "Window Sensor" and state == 'alarm':
+            elif modelname in ["Window Sensor", "Alarm Entry Sensor 2"] and state == 'alarm':
                 sub_device="door"
                 component[f"{devid}_{sub_device}"] = MQTT_AD_Device(devname, modelname, feature, sub_device, d)
                 component[f"{devid}_{sub_device}"].device_config_publish()
@@ -311,10 +334,10 @@ while True:
                     component[f"{devid}_temp"].device_json({ "temperature": dv }, timestamp=dt)
                 elif state == 'alarm':
                     onoff = 'ON' if dv else 'OFF'
-                    if modelname == "Motion Sensor Mini":
+                    if modelname in ["Motion Sensor Mini", "Alarm Motion Sensor 2"]:
                         component[f"{devid}_motion"].device_message(onoff, timestamp=dt)
-                    elif modelname == "Window Sensor":
-                        # Used mostly for doors - even if model name is Window Sensor
+
+                    elif modelname in ["Window Sensor", "Alarm Entry Sensor 2"]:
                         component[f"{devid}_door"].device_message(onoff, timestamp=dt)
                 elif state == 'networklinkstrength' and int(dv) < devs_lqi:
                     devs_lqi = int(dv)
