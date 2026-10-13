@@ -89,7 +89,7 @@ class HomelyEntityTests(unittest.TestCase):
 
     def test_known_alarm_models_use_their_actual_state_names(self):
         cases = (
-            ("Alarm Entry Sensor 2", "alarm", "alarm_event"),
+            ("Alarm Entry Sensor 2", "alarm", "door"),
             ("Alarm Motion Sensor 2", "alarm", "motion"),
             ("Intelligent Smoke Alarm", "fire", "smoke"),
             ("Water Leak Detector", "flood", "moisture"),
@@ -100,6 +100,8 @@ class HomelyEntityTests(unittest.TestCase):
             self.assertEqual(alarm.state, state)
             self.assertEqual(alarm.component, component)
             self.assertEqual(alarm.object_name, "alarm")
+            if model == "Alarm Entry Sensor 2":
+                self.assertEqual(alarm.display_name, "Kontakt")
 
     def test_rest_and_websocket_share_the_same_registered_entity(self):
         source = device(

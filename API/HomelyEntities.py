@@ -33,7 +33,8 @@ COMMON_ENTITIES = (
 MODEL_ENTITIES = {
     "Alarm Entry Sensor 2": (
         # Homely emits a short alarm pulse; it is not a persistent open/closed state.
-        EntityDefinition("alarm", "alarm", "alarm", "alarm_event", "binary", display_name="Alarm"),
+        # Present it as a contact in Home Assistant for the familiar open/closed UI.
+        EntityDefinition("alarm", "alarm", "alarm", "door", "binary", display_name="Kontakt"),
     ),
     "Alarm Motion Sensor 2": (
         EntityDefinition("alarm", "alarm", "alarm", "motion", "binary", display_name="Bevegelse"),
@@ -59,7 +60,7 @@ MODEL_ENTITIES = {
         EntityDefinition("alarm", "alarm", "alarm", "motion", "binary", display_name="Bevegelse"),
     ),
     "Window Sensor": (
-        EntityDefinition("alarm", "alarm", "alarm", "alarm_event", "binary", display_name="Alarm"),
+        EntityDefinition("alarm", "alarm", "alarm", "door", "binary", display_name="Kontakt"),
     ),
 }
 
