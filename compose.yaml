@@ -10,7 +10,7 @@ services:
     environment:
       TZ: Europe/Oslo
       MQTT_DISCOVERY: homeassistant
-      MQTT_STATE: homely-test
+      MQTT_STATE: homely
 
     volumes:
       - /etc/localtime:/etc/localtime:ro
