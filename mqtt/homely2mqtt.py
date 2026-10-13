@@ -4,9 +4,9 @@ import time, sys, os, json, argparse, logging
 import paho.mqtt.client as mqtt
 from HomelyAPI import *
 from MQTT_AD_Devices import *
+from HomelyEntities import HomelyEntityRegistry
 
 progname  = os.path.splitext(os.path.basename(sys.argv[0]))[0]
-component = {}
 sleepfor  = 15 
 alarm_previous_state = "in startup state"
 
@@ -129,10 +129,6 @@ else:
 
     print('------------------------- Home state ----------------------------------')
     hs = h.homestatus()
-    # Midlertidig eksport av Homely-data
-    with open("/tmp/homely-devices.json", "w", encoding="utf-8") as f:
-        json.dump(hs, f, indent=2, ensure_ascii=False)
-
     if args.save != "":
         with open(args.save, "w") as wfile:
             json.dump(hs, wfile)
@@ -197,57 +193,79 @@ main_alarm.device_config_append({
     "initial_option" : "Transitioning"
 })
 main_alarm.device_config_publish()
+main_alarm.device_availability(True)
 
 devices_lqi = MQTT_AD_Device("Gateway", "Minimum link quality", "links", "linkpercent")
 devices_lqi.device_config_publish()
+devices_lqi.device_availability(True)
 
 devices_tamper = MQTT_AD_Device("Gateway", "Tamper switches", "tamper", "tamper")
 devices_tamper.device_config_publish()
+devices_tamper.device_availability(True)
 
 devices_online = MQTT_AD_Device("Gateway", "Connectivities", "connectivity", "connectivity")
 devices_online.device_config_publish()
+devices_online.device_availability(True)
 
 devices_lowbat = MQTT_AD_Device("Gateway", "Battery states", "battery", "battery")
 devices_lowbat.device_config_publish()
+devices_lowbat.device_availability(True)
 
-for d in hs['devices']:
-    serial    = d['serialNumber']
-    devid     = d['id']
-    devname   = d['name']
-    modelname = d['modelName']
-    for feature in d['features'].keys():
-        ds=d['features'][feature]['states']
-        for state in ds.keys():
-            if state not in ['alarm','temperature']:
-                continue
-            dv = ds[state]['value']
-            name_model = f"{devname}_{modelname}"
-            logger.debug(f"Serial {serial} --> {modelname} name {devname} feature {feature} {state} {dv}")
-            if feature == 'temperature':
-                sub_device="temp"
-                component[f"{devid}_{sub_device}"] = MQTT_AD_Device(devname, modelname, feature, sub_device, d)
-                component[f"{devid}_{sub_device}"].device_config_publish()
-            elif modelname in ["Motion Sensor Mini", "Alarm Motion Sensor 2"] and state == 'alarm':
-                sub_device="motion"
-                component[f"{devid}_{sub_device}"] = MQTT_AD_Device(devname, modelname, feature, sub_device, d)
-                component[f"{devid}_{sub_device}"].device_config_publish()
-            elif modelname in ["Window Sensor", "Alarm Entry Sensor 2"] and state == 'alarm':
-                sub_device="door"
-                component[f"{devid}_{sub_device}"] = MQTT_AD_Device(devname, modelname, feature, sub_device, d)
-                component[f"{devid}_{sub_device}"].device_config_publish()
-            elif modelname == "Intelligent Smoke Alarm" and state == 'alarm':
-                sub_device = "smoke"
-                component[f"{devid}_{sub_device}"] = MQTT_AD_Device(
-                    devname, modelname, feature, sub_device, d
-                )
-                component[f"{devid}_{sub_device}"].device_config_publish()
+def mqtt_device_factory(device, definition):
+    return MQTT_AD_Device(
+        device['name'],
+        device['modelName'],
+        definition.object_name,
+        definition.component,
+        device,
+        entity_name=definition.display_name,
+    )
 
-            elif modelname == "Water Leak Detector" and state == 'alarm':
-                sub_device = "moisture"
-                component[f"{devid}_{sub_device}"] = MQTT_AD_Device(
-                    devname, modelname, feature, sub_device, d
-                )
-                component[f"{devid}_{sub_device}"].device_config_publish()
+
+entity_registry = HomelyEntityRegistry(mqtt_device_factory, logger=logger)
+
+
+def feature_value(device, feature, state, default=None):
+    return (
+        device.get('features', {})
+        .get(feature, {})
+        .get('states', {})
+        .get(state, {})
+        .get('value', default)
+    )
+
+
+def publish_gateway_summary(home_state):
+    devices = home_state.get('devices', [])
+    devices_online.device_message('ON' if all(d.get('online', False) for d in devices) else 'OFF')
+
+    low_battery = any(
+        bool(feature_value(d, 'battery', 'low', False))
+        or bool(feature_value(d, 'report', 'lowbat', False))
+        for d in devices
+    )
+    devices_lowbat.device_message('ON' if low_battery else 'OFF')
+
+    tampered = any(bool(feature_value(d, 'alarm', 'tamper', False)) for d in devices)
+    devices_tamper.device_message('ON' if tampered else 'OFF')
+
+    strengths = [
+        feature_value(d, 'diagnostic', 'networklinkstrength')
+        for d in devices
+    ]
+    strengths = [value for value in strengths if isinstance(value, (int, float))]
+    if strengths:
+        devices_lqi.device_json({'linkquality': min(strengths)})
+
+
+def publish_home(home_state):
+    entity_registry.publish_home(home_state)
+    publish_gateway_summary(home_state)
+
+
+# MQTT Discovery and initial state use the same definitions and value encoders
+# as subsequent REST polls and WebSocket updates.
+publish_home(hs)
 
 
 def alarm_state(ht):
@@ -269,31 +287,17 @@ def alarm_state(ht):
 # SocketIO message handler - running in separate thread
 #
 def siomsg(smsg):
-    logger.info('websocket callback:', smsg)
+    logger.info('websocket callback: %s', smsg)
     t = smsg['type']
     d = smsg['data']
     if t == 'device-state-changed':
         devid = d['deviceId']
         for c in d['changes']:
-            if c['stateName'] == 'temperature':
-                id_subdevice=f"{devid}_temp"
-                if id_subdevice in component:
-                    component[id_subdevice].device_json({ "temperature": c['value'] }, timestamp = c['lastUpdated'])
-                else:
-                    logger.warning("Unknown temperature device id", devid)
-            elif c['stateName'] == 'alarm':
-                onoff = 'ON' if c['value'] else 'OFF'
-                # 
-                # Only motion sensors and window/door sensors supported
-                #
-                for sub_device in ['motion', 'door', 'smoke', 'moisture']:
-                    id_subdevice=f"{devid}_{sub_device}"
-                    if id_subdevice in component:
-                        component[id_subdevice].device_message(onoff, timestamp = c['lastUpdated'])
-                        break
+            entity_registry.publish_change(devid, c)
     elif t == 'alarm-state-changed': 
         alarm_state(d['state'])
 
+alarm_state(hs['alarmState'])
 h.startsio(siomsg)
 
 while True:
@@ -318,65 +322,6 @@ while True:
     logger.info("Refreshing alarm status ... ")
     hs = h.homestatus()
     alarm_state(hs['alarmState'])
-
-    devs_online  = "ON"
-    devs_lowbat  = "OFF"
-    devs_tamper  = "OFF"
-    devs_lqi     = 100
-    for d in hs['devices']:
-        serial = d['serialNumber']
-        devid     = d['id']
-        devname   = d['name']
-        modelname = d['modelName']
-
-        if not d['online']:
-            devs_online = "OFF"
-        for feature in d['features'].keys():
-            ds=d['features'][feature]['states']
-            for state in ds.keys():
-                dv = ds[state]['value']       if 'value'       in ds[state] else None 
-                dt = ds[state]['lastUpdated'] if 'lastUpdated' in ds[state] else None
-                if dv is None or dt is None:
-                    logger.info(f"No value or lastUpdated for feature={feature}: device state ds={ds} state={state} ds[state]={ds[state]}")
-                    continue
-                name_model = f"{devname}_{modelname}"
-                logger.debug(f"Serial {serial} --> {modelname} name {devname} feature {feature} {state} {dv}")
-                
-                #
-                # Should not be needed any more , and is a good GUI indicator of socketio problems
-                # Still handy to include as device creation may not happen until a value is sent
-                #
-                if feature == 'temperature':
-                    component[f"{devid}_temp"].device_json({ "temperature": dv }, timestamp=dt)
-                elif state == 'alarm':
-                    onoff = 'ON' if dv else 'OFF'
-                    if modelname in ["Motion Sensor Mini", "Alarm Motion Sensor 2"]:
-                        component[f"{devid}_motion"].device_message(onoff, timestamp=dt)
-
-                    elif modelname in ["Window Sensor", "Alarm Entry Sensor 2"]:
-                        component[f"{devid}_door"].device_message(onoff, timestamp=dt)
-                    elif modelname == "Intelligent Smoke Alarm":
-                        component[f"{devid}_smoke"].device_message(
-                            onoff, timestamp=dt
-                        )
-
-                    elif modelname == "Water Leak Detector":
-                        component[f"{devid}_moisture"].device_message(
-                            onoff, timestamp=dt
-                        )
-
-                elif state == 'networklinkstrength' and int(dv) < devs_lqi:
-                    devs_lqi = int(dv)
-                elif state == 'low' and dv:
-                    devs_lowbat = "ON"
-                elif state == 'tamper' and dv:
-                    devs_tamper = "ON"
-
-
-
-    devices_lqi.device_json({ "linkquality": devs_lqi })
-    devices_online.device_message(devs_online)
-    devices_tamper.device_message(devs_tamper)
-    devices_lowbat.device_message(devs_lowbat)
+    publish_home(hs)
     
 # vim:ts=4:sw=4

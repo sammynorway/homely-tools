@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+.env.*
+*.token
+tokens.json
+homely-token.json
+homely-devices.json
+homely-schema.json
+**/__pycache__
+*.pyc
+test_*.py
+Docker.md
+README.md

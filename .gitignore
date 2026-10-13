@@ -14,8 +14,15 @@
 *.out
 
 .env
+.env.*
+!.env.example
+*.token
+tokens.json
+homely-token.json
 
 # MacOS 
 .DS_Store
 homely-devices.json
 homely-schema.json
+HA_broker.json
+local_broker.json

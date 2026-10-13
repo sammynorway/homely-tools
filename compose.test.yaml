@@ -1,0 +1,41 @@
+name: homely-mqtt-isolated-test
+
+services:
+  mqtt-test:
+    image: eclipse-mosquitto:2
+    container_name: homely-mqtt-test-broker
+    restart: "no"
+    ports:
+      # Localhost-only: Home Assistant and other LAN clients cannot connect.
+      - "127.0.0.1:1884:1883"
+    volumes:
+      - ./mqtt-test/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    networks:
+      - homely-test
+
+  homely-tools-test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: homely-tools:dynamic-sensors
+    container_name: homely-tools-isolated-test
+    restart: "no"
+    depends_on:
+      mqtt-test:
+        condition: service_started
+    env_file:
+      - .env
+    environment:
+      # Always use the isolated broker, regardless of production values in .env.
+      MQTT_SERVER: mqtt-test
+      MQTT_PORT: "1883"
+      MQTT_USER: ""
+      MQTT_PASSWORD: ""
+      MQTT_DISCOVERY: homeassistant
+      MQTT_STATE: homely
+    networks:
+      - homely-test
+
+networks:
+  homely-test:
+    driver: bridge

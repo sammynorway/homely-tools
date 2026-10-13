@@ -21,6 +21,15 @@ def devtype_component(dt):
         'temp':             'sensor',
         'smoke':            'binary_sensor',
         'moisture':         'binary_sensor',
+        'alarm_event':      'binary_sensor',
+        'problem':          'binary_sensor',
+        'voltage':          'sensor',
+        'link_quality':     'sensor',
+        'network_address':  'sensor',
+        'lock_status':      'sensor',
+        'lock':             'binary_sensor',
+        'event':            'sensor',
+        'error_code':       'sensor',
         'dummy':            None
     }.get(dt, dt)
 
@@ -29,6 +38,12 @@ def devtype_class(dt):
         'selector':         'select',
         'temp':             'temperature',
         'linkpercent':      None,
+        'alarm_event':      None,
+        'link_quality':     None,
+        'network_address':  None,
+        'lock_status':      None,
+        'event':            None,
+        'error_code':       None,
         'dummy':            None
     }.get(dt, dt)
 
@@ -40,6 +55,13 @@ def devtype_icons(dt):
         'motion':           'mdi:motion-sensor',
         'smoke':            'mdi:smoke-detector',
         'moisture':         'mdi:water-alert',
+        'alarm_event':      'mdi:alarm-light',
+        'voltage':          'mdi:battery-heart-variant',
+        'link_quality':     'mdi:signal',
+        'network_address':  'mdi:network-outline',
+        'lock_status':      'mdi:lock',
+        'event':            'mdi:history',
+        'error_code':       'mdi:alert-circle-outline',
         'dummy':            None
     }.get(dt, None)
 
@@ -48,6 +70,8 @@ def devtype_units(dt):
         'linkpercent':      '%',
         'temperature':      '°C',
         'temp':             '°C',
+        'voltage':          'V',
+        'link_quality':     '%',
         'dummy':            None
     }.get(dt, None)
 
@@ -68,7 +92,7 @@ def normalized_name(name):
 
 class MQTT_AD_Config(dict):
 
-    def __init__(self, sitename, mqtt_client, discovery_topic="homeassistant", state_topic=None, config_filename=None, logger=None):
+    def __init__(self, sitename, mqtt_client, discovery_topic="homeassistant", state_topic=None, config_filename=None, logger=None, discovery_delay=0.05):
         self.site = sitename
         if logger is None:
             self.logger = default_logger
@@ -88,6 +112,7 @@ class MQTT_AD_Config(dict):
             self.logger.info("Domoticz mode")
         self.mqttclient      = mqtt_client
         self.repeat_timeout  = 1200
+        self.discovery_delay = discovery_delay
         if config_filename is not None:
             self.logger.info("Reading device config from %s",config_file)
             with open(config_filename) as f_config:
@@ -99,7 +124,7 @@ class MQTT_AD_Config(dict):
 
 class MQTT_AD_Device:
 
-    def __init__(self, devname, model_name, object_name, component, devattr={}):
+    def __init__(self, devname, model_name, object_name, component, devattr={}, entity_name=None):
         main_name            = normalized_name(f"{devname}_{model_name}")
         self.friendly_name   = normalized_name(f"{mqconf.site} {main_name} {object_name}")
         full_name            = normalized_name(f"{mqconf.site}_{main_name}")
@@ -107,16 +132,17 @@ class MQTT_AD_Device:
         device_component     = devtype_component(component)
         device_topic         = f"{mqconf.state_topic}/{full_name}/{object_name}"
         self.state_topic     = f"{device_topic}/state"
+        self.availability_topic = f"{mqconf.state_topic}/{full_name}/availability"
         self.discovery_topic = f"{mqconf.discovery_topic}/{device_component}/{full_name}/{object_name}/config"
         self.send_interval   = 1200
         self.last_update     = 0
         self.last_timestamp  = 'init time'
         self.last_state      = 'init state'
         self.config = { 
-            "name": full_name,
+            "name": entity_name or full_name,
             "unique_id": f"{full_name}_{object_name}",
             "state_topic" : f"{device_topic}/state",
-            "command_topic" : f"{device_topic}/set",
+            "availability_topic": self.availability_topic,
             "device" : {
                 "identifiers" : [ full_name ],
                 "name" : main_name,
@@ -125,6 +151,10 @@ class MQTT_AD_Device:
                 "model" : "Internal device"
             }
         }
+
+        # Read-only sensors must not advertise an unsupported command topic.
+        if device_component in ('select', 'switch'):
+            self.config['command_topic'] = f"{device_topic}/set"
 
         device_class = devtype_class(component)
         if device_class is not None:
@@ -154,14 +184,33 @@ class MQTT_AD_Device:
 
     def device_config_publish(self):
         mqconf.logger.debug("%s topic %s publish config %s", self.friendly_name,self.discovery_topic,self.config)
-        mqconf.mqttclient.publish(self.discovery_topic, payload=json.dumps(self.config), qos=0, retain=True)
+        result = mqconf.mqttclient.publish(self.discovery_topic, payload=json.dumps(self.config), qos=1, retain=True)
+        if hasattr(result, 'wait_for_publish'):
+            result.wait_for_publish()
+        if mqconf.discovery_delay:
+            time.sleep(mqconf.discovery_delay)
+
+    def device_availability(self, online):
+        message = 'online' if online else 'offline'
+        mqconf.logger.info("%s topic %s publish availability %s", self.friendly_name, self.availability_topic, message)
+        result = mqconf.mqttclient.publish(
+            self.availability_topic,
+            message,
+            qos=1,
+            retain=True,
+        )
+        if hasattr(result, 'wait_for_publish'):
+            result.wait_for_publish()
+        return True
     
     def device_message(self, message, timestamp=None):
         epoch_time = int(time.time())
         if timestamp is not None:
             if timestamp != self.last_timestamp:
                 mqconf.logger.info("%s topic %s update time %s != %s publish value %s", self.friendly_name, self.state_topic, timestamp, self.last_timestamp, message)
-                mqconf.mqttclient.publish(self.state_topic, message)
+                # Retain the latest state so Home Assistant receives it even
+                # when discovery processing/subscription happens afterwards.
+                mqconf.mqttclient.publish(self.state_topic, message, qos=1, retain=True)
                 self.last_update= epoch_time
                 self.last_timestamp = timestamp
             else:
@@ -170,7 +219,7 @@ class MQTT_AD_Device:
 
         if self.last_state != message or epoch_time > self.last_update + self.send_interval:
             mqconf.logger.info("%s topic %s publish value %s", self.friendly_name,self.state_topic, message)
-            mqconf.mqttclient.publish(self.state_topic, message)
+            mqconf.mqttclient.publish(self.state_topic, message, qos=1, retain=True)
             self.last_state = message
             self.last_update= epoch_time
             return True
